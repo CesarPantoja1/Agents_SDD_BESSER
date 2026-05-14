@@ -27,6 +27,8 @@ import { scaffoldObjectsFromClasses } from './scaffoldObjectsFromClasses';
 interface DiagramTabsProps {
   onRequestTabSwitch?: (index: number) => Promise<boolean> | boolean;
   userModelValidationStatusById?: Record<string, QualityCheckState>;
+  sddFile?: { path: string; content: string | null } | null;
+  onCloseSddFile?: () => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -109,6 +111,8 @@ const isDiagramEmpty = (diagram: ProjectDiagram | undefined): boolean => {
 export const DiagramTabs: React.FC<DiagramTabsProps> = ({
   onRequestTabSwitch,
   userModelValidationStatusById,
+  sddFile,
+  onCloseSddFile,
 }) => {
   const dispatch = useAppDispatch();
   const diagrams = useAppSelector(selectDiagramsForActiveType);
@@ -309,7 +313,7 @@ export const DiagramTabs: React.FC<DiagramTabsProps> = ({
       <div className="flex items-center gap-0 px-1">
         <div className="flex items-end gap-px py-1 pl-1">
           {diagrams.map((diagram: ProjectDiagram, index: number) => {
-            const isActive = index === safeIndex;
+            const isActive = index === safeIndex && !sddFile;
             const isRenaming = renamingIndex === index;
             const userValidationStatus = currentDiagramType === 'UserDiagram'
               ? userModelValidationStatusById?.[diagram.id] ?? 'not_validated'
@@ -383,6 +387,28 @@ export const DiagramTabs: React.FC<DiagramTabsProps> = ({
               </div>
             );
           })}
+
+          {/* SDD File Tab */}
+          {sddFile && (
+            <div
+              role="tab"
+              aria-selected={true}
+              className="group relative flex cursor-pointer select-none items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium transition-all duration-150 border-b-2 border-brand bg-card text-brand-dark shadow-[0_1px_3px_rgba(0,0,0,0.08),0_0_0_1px_hsl(var(--brand)/0.1)]"
+            >
+              <FileText className="size-3 shrink-0 text-brand" />
+              <span className="max-w-[140px] truncate">{sddFile.path.split(/[\\/]/).pop()}</span>
+              {onCloseSddFile && (
+                <button
+                  className="ml-0.5 rounded-sm p-0.5 transition-colors text-muted-foreground hover:bg-muted hover:text-destructive"
+                  onClick={(e) => { e.stopPropagation(); onCloseSddFile(); }}
+                  aria-label={`Close tab ${sddFile.path}`}
+                  title="Close tab"
+                >
+                  <X className="size-3" />
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Add button */}
           {diagrams.length < MAX_DIAGRAMS_PER_TYPE && (

@@ -196,6 +196,18 @@ export function useSDDSession(isActive: boolean) {
     clientRef.current.send({ type: 'list_files' });
   }, [connectionStatus]);
 
+  // Listen for save-file events from the external file viewer
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.path && detail?.content !== undefined && clientRef.current?.isConnected()) {
+        clientRef.current.send({ type: 'write_file', path: detail.path, content: detail.content });
+      }
+    };
+    window.addEventListener('sdd:save-file', handler);
+    return () => window.removeEventListener('sdd:save-file', handler);
+  }, []);
+
   const sendMessage = useCallback((text: string) => {
     if (!clientRef.current?.isConnected()) return;
 

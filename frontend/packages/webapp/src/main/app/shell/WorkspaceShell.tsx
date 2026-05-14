@@ -58,6 +58,9 @@ const HelpGuideDialog = React.lazy(() =>
 const SDDPanel = React.lazy(() =>
   import('../../features/sdd/components/SDDPanel').then((m) => ({ default: m.SDDPanel })),
 );
+const SDDFileViewer = React.lazy(() =>
+  import('../../features/sdd/components/SDDFileViewer').then((m) => ({ default: m.SDDFileViewer })),
+);
 // The keyboard toggle hook must be imported eagerly (it registers a global listener).
 // KeyboardShortcutsDialog is imported statically alongside the hook to avoid Vite's
 // mixed static/dynamic import warning (the module is already in this chunk).
@@ -170,6 +173,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   const [isGitHubSidebarOpen, setIsGitHubSidebarOpen] = useState(false);
   const [isAssistantWorkspaceOpen, setIsAssistantWorkspaceOpen] = useState(false);
   const [isSDDPanelOpen, setIsSDDPanelOpen] = useState(false);
+  const [sddViewerFile, setSddViewerFile] = useState<{ path: string; content: string | null } | null>(null);
   const [userModelValidationByDiagramId, setUserModelValidationByDiagramId] = useState<Record<string, UserModelValidationRecord>>({});
 
   // Derived values
@@ -833,23 +837,37 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
         <Suspense fallback={null}>
           <SDDPanel
             open={isSDDPanelOpen}
-            onClose={() => setIsSDDPanelOpen(false)}
+            onClose={() => { setIsSDDPanelOpen(false); setSddViewerFile(null); }}
             isDarkTheme={isDarkTheme}
+            onFileOpen={(path, content) => {
+              if (!path) {
+                setSddViewerFile(null);
+              } else {
+                setSddViewerFile({ path, content });
+              }
+            }}
             onImportDiagram={async (diagramJson) => {
               try {
+                console.log('[SDD] Importing diagram to canvas:', diagramJson);
                 const { ClassDiagramConverter } = await import('../../features/assistant/services/converters/ClassDiagramConverter');
                 const converter = new ClassDiagramConverter();
                 const apollonModel = converter.convertCompleteSystem(diagramJson);
+                console.log('[SDD] Converted to Apollon model:', apollonModel);
                 if (apollonModel && currentProject) {
-                  dispatch(updateDiagramModelThunk({ model: apollonModel }));
+                  await dispatch(updateDiagramModelThunk({ model: apollonModel as any })).unwrap();
+                  dispatch(bumpEditorRevision());
                   toast.success('Diagrama importado al canvas exitosamente.');
+                } else {
+                  console.warn('[SDD] No apollonModel or no currentProject');
+                  toast.error('Error: no hay proyecto activo para importar el diagrama.');
                 }
               } catch (err) {
-                console.error('Failed to import diagram:', err);
+                console.error('[SDD] Failed to import diagram:', err);
                 toast.error('Error importando el diagrama al canvas.');
               }
             }}
           />
+          {/* SDDFileViewer moved to main canvas area */}
         </Suspense>
 
         <WorkspaceSidebar
@@ -882,11 +900,29 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
             <DiagramTabs
               onRequestTabSwitch={handleRequestTabSwitch}
               userModelValidationStatusById={userModelValidationStatusById}
+              sddFile={sddViewerFile && isSDDPanelOpen ? sddViewerFile : null}
+              onCloseSddFile={() => setSddViewerFile(null)}
             />
           )}
-          <div className="relative min-h-0 flex-1 overflow-hidden">{children}</div>
+          <div className="relative min-h-0 flex-1 overflow-hidden">
+            {sddViewerFile && isSDDPanelOpen ? (
+              <SDDFileViewer
+                filePath={sddViewerFile.path}
+                fileContent={sddViewerFile.content}
+                isDarkTheme={isDarkTheme}
+                onClose={() => setSddViewerFile(null)}
+                onSave={(path, content) => {
+                  window.dispatchEvent(new CustomEvent('sdd:save-file', { detail: { path, content } }));
+                  setSddViewerFile({ path, content });
+                }}
+              />
+            ) : (
+              children
+            )}
+          </div>
 
           {/* Onboarding checklist - fixed bottom-right */}
+          {/*
           {onboarding && !onboarding.checklistDismissed && (
             <div className="absolute bottom-4 right-4 z-30 w-56">
               <OnboardingChecklist
@@ -899,6 +935,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
               />
             </div>
           )}
+          */}
         </main>
 
         <Suspense fallback={null}>
