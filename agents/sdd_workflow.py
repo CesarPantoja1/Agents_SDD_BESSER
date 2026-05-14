@@ -35,9 +35,22 @@ SCRIPT_DIR = pathlib.Path(__file__).parent
 
 
 def _detectar_idioma(texto: str) -> str:
-    """Detecta el idioma del texto de forma determinística."""
+    """Detecta el idioma del texto de forma determinística.
+
+    Para textos muy cortos (< 30 chars) usa heurística en lugar de langdetect
+    porque la librería es propensa a falsos positivos con pocas palabras.
+    """
+    t = texto.strip()
+    if len(t) < 30:
+        # Heurística rápida para español vs otros idiomas europeos
+        lower = t.lower()
+        spanish_markers = ["ñ", "á", "é", "í", "ó", "ú", "ü", "quiero", "haz", "genera", "diagrama", "listo", "continuar", "siguiente"]
+        if any(m in lower for m in spanish_markers):
+            return "es"
+        # Si no hay marcadores, asumimos español por defecto (proyecto hispanohablante)
+        return "es"
     try:
-        return detect(texto)
+        return detect(t)
     except Exception:
         return "es"
 
@@ -126,7 +139,7 @@ def _analizar_impacto_llm(
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
     temperature=0.2,
-    google_api_key="",
+    google_api_key="AIzaSyCIpP38x7zZHQ-03WOTrBJhAmbdcW1ZQyg",
 )
 
 structured_llm_fase = llm.with_structured_output(FaseOutput)
@@ -840,7 +853,15 @@ def nodo_diagram(state: State):
 
     old_content = state.get("diagram_content")
     user_message = state["messages"][-1].content
-    idioma = _detectar_idioma(user_message)
+
+    # Detectar idioma de las especificaciones existentes, NO del mensaje corto del usuario
+    # (langdetect falla con textos cortos y puede devolver idiomas incorrectos)
+    idioma = "es"  # default seguro
+    for fase_key in ["product_content", "discovery_content", "requirements_content", "design_content"]:
+        content = state.get(fase_key)
+        if content and len(content) > 100:
+            idioma = _detectar_idioma(content)
+            break
 
     # Construir prompt enriquecido con contexto de todas las fases anteriores
     contexto_parts = []
@@ -856,28 +877,80 @@ def nodo_diagram(state: State):
     contexto = "\n\n".join(contexto_parts)
 
     system_prompt = (
-        "Eres un experto en modelado UML y diseño orientado a objetos. "
-        "Tu tarea es generar un diagrama de clases completo basado en las especificaciones del sistema.\n\n"
-        "REGLAS CRÍTICAS:\n"
-        "1. Crea TODAS las clases del dominio que se mencionen o impliquen en las especificaciones.\n"
-        "2. Cada clase debe tener 3-5+ atributos relevantes (IDs, timestamps, campos de negocio).\n"
-        "3. Incluye relaciones significativas: Association, Composition, Aggregation, Inheritance.\n"
-        "4. SIEMPRE incluye multiplicidades (1, 0..1, 0..*, 1..*).\n"
-        "5. Omite getters/setters. Solo métodos de dominio si son obvios.\n"
-        "6. Usa PascalCase para clases, camelCase para atributos.\n"
-        "7. Si hay enumeraciones (estados, tipos), créalas como clases con isEnumeration=true.\n"
-        "8. Las clases deben reflejar fielmente las entidades descritas en los requisitos y el diseño.\n"
-        "9. NO incluyas coordenadas de posición; el layout se calcula automáticamente.\n"
-        f"\n=== REGLA DE IDIOMA ===\n"
-        f"El proyecto está en idioma: '{idioma}'. Genera los nombres de clases, atributos y relaciones en este idioma.\n"
+        "Eres un arquitecto de software senior especializado en modelado UML y diseño orientado a objetos. "
+        "Tu tarea es generar un diagrama de clases completo, profesional y alineado con las especificaciones del sistema.\n\n"
+        "=== PROCESO DE MODELADO (sigue estos pasos obligatoriamente) ===\n"
+        "PASO 1 - Análisis de Requisitos Funcionales:\n"
+        "   Lee detalladamente la sección REQUIREMENTS. Identifica cada actor, entidad de dominio, "
+        "   objeto de valor y agregado mencionado o implícito en los requisitos funcionales.\n"
+        "   Cada requisito que involucre una entidad (ej. 'publicar anuncio', 'enviar mensaje', 'crear usuario') "
+        "   DEBE traducirse en al menos una clase del diagrama.\n\n"
+        "PASO 2 - Identificación de Clases:\n"
+        "   - Entidades principales del dominio (ej. Usuario, Vehículo, Anuncio, Mensaje).\n"
+        "   - Objetos de valor (Value Objects) que merezcan clase propia (ej. Dirección, Precio, FiltroBusqueda).\n"
+        "   - Enumeraciones para estados, tipos, roles o categorías discretas (ej. EstadoPublicacion, TipoUsuario, Rol).\n"
+        "   - Clases de servicio o utilidad SOLO si están explícitamente justificadas en el diseño.\n"
+        "   - NO crees clases genéricas sin soporte en los requisitos (ej. 'Database', 'Manager', 'Handler').\n\n"
+        "PASO 3 - Definición de Atributos:\n"
+        "   Cada clase DEBE tener entre 3 y 8 atributos relevantes al dominio.\n"
+        "   - ID único (tipo UUID o int) como primer atributo.\n"
+        "   - Campos de negocio esenciales derivados de los requisitos.\n"
+        "   - Timestamps (fechaCreacion, fechaActualizacion) cuando aplique.\n"
+        "   - Estados o flags booleanos solo si son necesarios.\n"
+        "   - NO incluyas atributos derivados que se puedan calcular (salvo que estén explícitos en reqs).\n"
+        "   - Usa camelCase para nombres de atributos.\n\n"
+        "PASO 4 - Definición de Métodos:\n"
+        "   - Omite getters/setters por completo (son implícitos en UML).\n"
+        "   - Incluye SOLO métodos de comportamiento de dominio (ej. publicar(), enviar(), validar(), calcularTotal()).\n"
+        "   - Cada método debe tener un returnType apropiado (void, boolean, o una clase del dominio).\n"
+        "   - Si un método no tiene comportamiento obvio, NO lo incluyas.\n"
+        "   - Usa camelCase para nombres de métodos.\n\n"
+        "PASO 5 - Relaciones entre Clases:\n"
+        "   Analiza cada requisito que implique interacción entre entidades y modela la relación apropiada:\n"
+        "   - Association: cuando dos clases se relacionan pero son independientes (ej. Usuario -> Mensaje).\n"
+        "   - Composition: cuando una clase NO puede existir sin la otra (parte-todo fuerte).\n"
+        "   - Aggregation: cuando una clase puede existir independientemente (parte-todo débil).\n"
+        "   - Inheritance: SOLO cuando haya una relación 'es-un' clara y justificada (ej. UsuarioPremium es Usuario).\n"
+        "   - SIEMPRE define multiplicidades precisas: 1, 0..1, 0..*, 1..*.\n"
+        "   - Evita relaciones redundantes o cíclicas innecesarias.\n\n"
+        "PASO 6 - Enumeraciones:\n"
+        "   Crea enumeraciones (isEnumeration=true) para:\n"
+        "   - Estados de entidades (ej. EstadoPedido: PENDIENTE, ENVIADO, ENTREGADO).\n"
+        "   - Tipos o roles (ej. TipoUsuario: COMPRADOR, VENDEDOR, ADMIN).\n"
+        "   - Categorías discretas que se repiten en múltiples clases.\n"
+        "   - Los valores de enumeración van como atributos SIN tipo (solo name).\n\n"
+        "=== REGLAS DE CALIDAD ===\n"
+        "1. COHERENCIA CON REQUISITOS: Cada clase, atributo y relación DEBE ser trazable a un requisito funcional.\n"
+        "2. COMPLETITUD: No omitas entidades mencionadas en los requisitos (ej. si hay 'notificaciones', debe existir clase Notificacion).\n"
+        "3. PROPIEDADES TÉCNICAS: NO incluyas clases de infraestructura (Controller, Service, Repository, DAO).\n"
+        "4. NOMENCLATURA: PascalCase para clases, camelCase para atributos/métodos, nombres semánticos y descriptivos.\n"
+        "5. VISIBILIDAD: Usa 'public' por defecto; 'private' solo para atributos sensibles; 'protected' solo con herencia.\n"
+        "6. AUSENCIA DE POSICIONES: NO incluyas campo 'position' en ninguna clase; el layout engine las calcula.\n"
+        "7. IDIOMA: Genera TODO el contenido del diagrama en el idioma del proyecto.\n\n"
+        f"=== REGLA DE IDIOMA ===\n"
+        f"El proyecto está en idioma: '{idioma}'.\n"
+        f"TODOS los nombres de clases, atributos, métodos y relaciones DEBEN estar en '{idioma}'.\n"
+        "Ejemplo en español: clase 'Usuario', atributo 'nombreCompleto', método 'publicarAnuncio()'.\n"
+        "Ejemplo en inglés: clase 'User', atributo 'fullName', método 'publishListing()'.\n"
+        "NUNCA mezcles idiomas. NUNCA uses inglés si el proyecto está en español.\n"
     )
 
     user_prompt = (
         f"{contexto}\n\n"
-        "=== INSTRUCCIÓN ===\n"
-        f"Basado en las especificaciones anteriores, genera un diagrama de clases completo.\n"
-        f"Solicitud específica del usuario: {user_message}\n\n"
-        "Genera TODAS las clases, atributos, métodos y relaciones que correspondan."
+        "=== INSTRUCCIÓN DE GENERACIÓN ===\n"
+        f"Solicitud del usuario: {user_message}\n\n"
+        "Sigue el PROCESO DE MODELADO definido en las instrucciones del sistema (Pasos 1-6). "
+        "Analiza ESPECÍFICAMENTE la sección REQUIREMENTS para identificar todas las entidades del dominio. "
+        "Luego, complementa con PRODUCT (visión de negocio), DISCOVERY (scope y stack) y DESIGN (componentes y modelos de datos) "
+        "para enriquecer atributos y relaciones que no estén explícitos en los requisitos.\n\n"
+        "PASO A PASO (piensa antes de generar):\n"
+        "1. Enumera mentalmente todas las entidades que aparecen en los requisitos funcionales.\n"
+        "2. Para cada entidad, define sus atributos de negocio más importantes.\n"
+        "3. Identifica enumeraciones necesarias (estados, tipos, roles).\n"
+        "4. Establece las relaciones entre entidades con multiplicidades precisas.\n"
+        "5. Revisa que NO falte ninguna entidad mencionada en los requisitos.\n"
+        "6. Genera el diagrama completo siguiendo el schema estructurado requerido.\n\n"
+        "Genera el diagrama de clases completo ahora."
     )
 
     messages = [
