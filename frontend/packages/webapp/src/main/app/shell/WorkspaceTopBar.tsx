@@ -1,5 +1,5 @@
 import React from 'react';
-import { FolderKanban } from 'lucide-react';
+import { FolderKanban, Zap } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { CommunityMenu } from './menus/CommunityMenu';
 import { DeployMenu } from './menus/DeployMenu';
@@ -60,6 +60,8 @@ const WorkspaceTopBarInner: React.FC<WorkspaceTopBarProps> = ({
   projectNameDraft,
   onProjectNameDraftChange,
   onProjectRename,
+  onToggleSDD,
+  isSDDOpen,
 }) => {
   return (
     <header className={`relative z-20 animate-slide-in-down px-4 py-2 sm:px-6 ${headerBackgroundClass}`}>
@@ -125,6 +127,19 @@ const WorkspaceTopBarInner: React.FC<WorkspaceTopBarProps> = ({
             outlineButtonClass={outlineButtonClass}
             onOpenFeedback={onOpenFeedback}
           />
+          <button
+            type="button"
+            onClick={onToggleSDD}
+            className={`hidden md:inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all ${
+              isSDDOpen
+                ? 'border-amber-500/40 bg-amber-500/10 text-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.15)]'
+                : outlineButtonClass + ' hover:border-amber-500/30 hover:text-amber-500'
+            }`}
+            title="SDD Studio — Spec-Driven Development"
+          >
+            <Zap className="size-3.5" />
+            <span>SDD</span>
+          </button>
           <HelpMenu
             outlineButtonClass={outlineButtonClass}
             onOpenHelpDialog={onOpenHelpDialog}

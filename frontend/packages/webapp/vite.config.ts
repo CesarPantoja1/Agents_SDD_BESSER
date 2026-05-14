@@ -34,6 +34,16 @@ export default defineConfig(({ mode }) => {
         usePolling: true,
         interval: 300,
       },
+      proxy: {
+        '/api/sdd': {
+          target: 'http://localhost:8765',
+          changeOrigin: true,
+        },
+        '/ws/sdd': {
+          target: 'ws://localhost:8765',
+          ws: true,
+        },
+      },
     },
   };
 });

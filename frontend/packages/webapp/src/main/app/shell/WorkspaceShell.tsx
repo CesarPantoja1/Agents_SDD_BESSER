@@ -55,6 +55,9 @@ const FeedbackDialog = React.lazy(() =>
 const HelpGuideDialog = React.lazy(() =>
   import('../../shared/dialogs/HelpGuideDialog').then((m) => ({ default: m.HelpGuideDialog })),
 );
+const SDDPanel = React.lazy(() =>
+  import('../../features/sdd/components/SDDPanel').then((m) => ({ default: m.SDDPanel })),
+);
 // The keyboard toggle hook must be imported eagerly (it registers a global listener).
 // KeyboardShortcutsDialog is imported statically alongside the hook to avoid Vite's
 // mixed static/dynamic import warning (the module is already in this chunk).
@@ -166,6 +169,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   const [isDarkTheme, setIsDarkTheme] = useState<boolean>(() => isDarkThemeEnabled());
   const [isGitHubSidebarOpen, setIsGitHubSidebarOpen] = useState(false);
   const [isAssistantWorkspaceOpen, setIsAssistantWorkspaceOpen] = useState(false);
+  const [isSDDPanelOpen, setIsSDDPanelOpen] = useState(false);
   const [userModelValidationByDiagramId, setUserModelValidationByDiagramId] = useState<Record<string, UserModelValidationRecord>>({});
 
   // Derived values
@@ -759,6 +763,8 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
         projectNameDraft={projectNameDraft}
         onProjectNameDraftChange={setProjectNameDraft}
         onProjectRename={handleProjectRename}
+        onToggleSDD={() => setIsSDDPanelOpen((prev) => !prev)}
+        isSDDOpen={isSDDPanelOpen}
       />
 
       {/* Mobile hamburger button - visible only below md breakpoint */}
@@ -823,6 +829,29 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
       </div>
 
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        {/* ---- SDD Panel (left) ---- */}
+        <Suspense fallback={null}>
+          <SDDPanel
+            open={isSDDPanelOpen}
+            onClose={() => setIsSDDPanelOpen(false)}
+            isDarkTheme={isDarkTheme}
+            onImportDiagram={async (diagramJson) => {
+              try {
+                const { ClassDiagramConverter } = await import('../../features/assistant/services/converters/ClassDiagramConverter');
+                const converter = new ClassDiagramConverter();
+                const apollonModel = converter.convertCompleteSystem(diagramJson);
+                if (apollonModel && currentProject) {
+                  dispatch(updateDiagramModelThunk({ model: apollonModel }));
+                  toast.success('Diagrama importado al canvas exitosamente.');
+                }
+              } catch (err) {
+                console.error('Failed to import diagram:', err);
+                toast.error('Error importando el diagrama al canvas.');
+              }
+            }}
+          />
+        </Suspense>
+
         <WorkspaceSidebar
           isDarkTheme={isDarkTheme}
           isSidebarExpanded={isSidebarExpanded}

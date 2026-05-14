@@ -59,4 +59,6 @@ export interface WorkspaceTopBarProps {
   projectNameDraft: string;
   onProjectNameDraftChange: (value: string) => void;
   onProjectRename: () => void;
+  onToggleSDD?: () => void;
+  isSDDOpen?: boolean;
 }

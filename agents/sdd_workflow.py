@@ -124,9 +124,9 @@ def _analizar_impacto_llm(
 # 2. Modelo Gemini
 # ---------------------------------------------------------------------------
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     temperature=0.2,
-    google_api_key=os.environ.get("GEMINI_API_KEY"),
+    google_api_key="",
 )
 
 structured_llm_fase = llm.with_structured_output(FaseOutput)
