@@ -32,7 +32,7 @@ function loadConfig(): SDDConfig {
 }
 
 function getDefaultConfig(): SDDConfig {
-  return { apiKey: '', model: 'gemini-2.5-flash', outputDir: '', recentDirs: [] };
+  return { apiKey: '', provider: 'gemini', model: 'gemini-2.5-flash', outputDir: '', recentDirs: [] };
 }
 
 function saveConfig(config: SDDConfig): void {
@@ -189,6 +189,7 @@ export function useSDDSession(isActive: boolean) {
       clientRef.current.send({
         type: 'config',
         apiKey: cfg.apiKey || undefined,
+        provider: cfg.provider || undefined,
         model: cfg.model || undefined,
         outputDir: cfg.outputDir || undefined,
       });
@@ -234,6 +235,7 @@ export function useSDDSession(isActive: boolean) {
         clientRef.current.send({
           type: 'config',
           apiKey: next.apiKey || undefined,
+          provider: next.provider || undefined,
           model: next.model || undefined,
           outputDir: next.outputDir || undefined,
         });
@@ -242,8 +244,18 @@ export function useSDDSession(isActive: boolean) {
     });
   }, []);
 
+  // Read file via REST API to avoid WebSocket blocking during agent processing
   const readFile = useCallback((path: string) => {
-    clientRef.current?.send({ type: 'read_file', path });
+    const dir = encodeURIComponent(configRef.current.outputDir || '');
+    const encodedPath = encodeURIComponent(path);
+    fetch(`http://localhost:8765/api/sdd/files/${encodedPath}?dir=${dir}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.content !== undefined) {
+          window.dispatchEvent(new CustomEvent('sdd:file-content', { detail: { path: data.path, content: data.content } }));
+        }
+      })
+      .catch((err) => console.error('[SDD] REST readFile error:', err));
   }, []);
 
   const writeFile = useCallback((path: string, content: string) => {

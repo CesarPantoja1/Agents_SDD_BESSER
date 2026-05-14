@@ -12,8 +12,9 @@ import os
 import pathlib
 import shutil
 import traceback
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
+import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -128,6 +129,11 @@ class FileWriteBody(BaseModel):
     content: str
 
 
+class ListModelsBody(BaseModel):
+    provider: str
+    apiKey: str
+
+
 @app.get("/api/sdd/files")
 async def api_list_files(dir: str = _DEFAULT_OUTPUT_DIR):
     return JSONResponse(_list_output_files(dir))
@@ -149,6 +155,47 @@ async def api_write_file(file_path: str, body: FileWriteBody, dir: str = _DEFAUL
     return JSONResponse({"ok": True, "path": file_path})
 
 
+@app.post("/api/sdd/list-models")
+async def api_list_models(body: ListModelsBody):
+    """Fetch available models for the given provider and API key."""
+    try:
+        models: list[dict] = []
+        if body.provider == "gemini":
+            # Google AI Studio - list models endpoint
+            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={body.apiKey}"
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                data = resp.json()
+            for m in data.get("models", []):
+                name = m.get("name", "")  # e.g. "models/gemini-2.5-flash"
+                model_id = name.replace("models/", "")
+                display = m.get("displayName", model_id)
+                # Only include generateContent-capable models
+                methods = m.get("supportedGenerationMethods", [])
+                if "generateContent" in methods:
+                    models.append({"id": model_id, "name": display})
+        elif body.provider == "openai":
+            url = "https://api.openai.com/v1/models"
+            headers = {"Authorization": f"Bearer {body.apiKey}"}
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(url, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+            for m in data.get("data", []):
+                mid = m.get("id", "")
+                # Filter for chat-capable models
+                if any(k in mid for k in ["gpt-4", "gpt-3.5", "o1", "o3", "o4"]):
+                    models.append({"id": mid, "name": mid})
+        # Sort alphabetically
+        models.sort(key=lambda x: x["name"])
+        return JSONResponse({"models": models})
+    except httpx.HTTPStatusError as e:
+        return JSONResponse({"error": f"API error: {e.response.status_code}", "models": []}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": str(e), "models": []}, status_code=500)
+
+
 # ---------------------------------------------------------------------------
 # WebSocket endpoint
 # ---------------------------------------------------------------------------
@@ -157,7 +204,7 @@ async def sdd_websocket(ws: WebSocket):
     await ws.accept()
     state = _make_empty_state()
     output_dir = _DEFAULT_OUTPUT_DIR
-    config = {"api_key": "", "model": "gemini-2.5-flash"}
+    config = {"api_key": "", "model": "gemini-2.5-flash", "provider": "gemini"}
 
     async def send(msg: dict):
         await ws.send_json(msg)
@@ -175,6 +222,8 @@ async def sdd_websocket(ws: WebSocket):
                     os.environ["GOOGLE_API_KEY"] = data["apiKey"]
                 if "model" in data:
                     config["model"] = data["model"]
+                if "provider" in data:
+                    config["provider"] = data["provider"]
                 if "outputDir" in data:
                     output_dir = data["outputDir"]
                     _initialize_project_dir(output_dir)
@@ -224,11 +273,20 @@ async def sdd_websocket(ws: WebSocket):
 
                     # Update LLM if API key set
                     if config["api_key"]:
-                        os.environ["GOOGLE_API_KEY"] = config["api_key"]
-                        sw.llm = ChatGoogleGenerativeAI(
-                            model=config["model"], temperature=0.2,
-                            google_api_key=config["api_key"],
-                        )
+                        provider = config.get("provider", "gemini")
+                        if provider == "openai":
+                            from langchain_openai import ChatOpenAI
+                            os.environ["OPENAI_API_KEY"] = config["api_key"]
+                            sw.llm = ChatOpenAI(
+                                model=config["model"], temperature=0.2,
+                                api_key=config["api_key"],
+                            )
+                        else:
+                            os.environ["GOOGLE_API_KEY"] = config["api_key"]
+                            sw.llm = ChatGoogleGenerativeAI(
+                                model=config["model"], temperature=0.2,
+                                google_api_key=config["api_key"],
+                            )
                         sw.structured_llm_fase = sw.llm.with_structured_output(sw.FaseOutput)
                         sw.structured_llm_artefacto = sw.llm.with_structured_output(sw.ArtefactoOutput)
                         sw.structured_llm_impacto = sw.llm.with_structured_output(sw.ImpactoOutput)

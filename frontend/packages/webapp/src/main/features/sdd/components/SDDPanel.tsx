@@ -9,6 +9,7 @@ import {
   Send, Loader2, FileText, RefreshCw, Trash2,
   CheckCircle2, Circle, Zap, Key, FolderInput,
   Lightbulb, Search, ClipboardList, Hammer, GitBranch,
+  Sparkles, ChevronDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSDDSession } from '../hooks/useSDDSession';
@@ -60,56 +61,89 @@ const PHASE_ICONS: Record<SDDPhase, React.FC<{ className?: string }>> = {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Phase tracker bar (scrollable)                                     */
+/*  Phase tracker bar (drag-scrollable, keeps icons, green when done)   */
 /* ------------------------------------------------------------------ */
 const PhaseTracker: React.FC<{
   phasesStatus: SDDPhasesStatus | null;
   currentPhase?: string | null;
   isDark: boolean;
-}> = ({ phasesStatus, currentPhase, isDark }) => (
-  <div
-    className={cn(
-      'overflow-x-auto border-b shrink-0',
-      isDark ? 'border-white/5' : 'border-gray-200',
-    )}
-    style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-  >
-    <div className="flex items-center gap-1.5 px-3 py-2 min-w-max">
-      {PHASE_ORDER.map((phase, i) => {
-        const done = phasesStatus?.[phase]?.completed;
-        const active = currentPhase === phase;
-        const Icon = PHASE_ICONS[phase];
-        return (
-          <React.Fragment key={phase}>
-            {i > 0 && (
-              <div className={cn(
-                'h-px w-4 shrink-0 transition-colors',
-                done ? 'bg-emerald-500/60' : (isDark ? 'bg-white/10' : 'bg-gray-200'),
-              )} />
-            )}
-            <div
-              className={cn(
-                'flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold transition-all shrink-0 whitespace-nowrap',
-                done && 'bg-emerald-500/15 text-emerald-400',
-                active && !done && 'bg-blue-500/15 text-blue-400 ring-1 ring-blue-500/30',
-                !done && !active && (isDark ? 'text-white/30' : 'text-gray-400'),
+}> = ({ phasesStatus, currentPhase, isDark }) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const isDragging = useRef(false);
+  const startX = useRef(0);
+  const scrollLeft = useRef(0);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    isDragging.current = true;
+    startX.current = e.pageX - el.offsetLeft;
+    scrollLeft.current = el.scrollLeft;
+    el.style.cursor = 'grabbing';
+  }, []);
+
+  const handleMouseUp = useCallback(() => {
+    isDragging.current = false;
+    if (scrollRef.current) scrollRef.current.style.cursor = 'grab';
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isDragging.current || !scrollRef.current) return;
+    e.preventDefault();
+    const x = e.pageX - scrollRef.current.offsetLeft;
+    const walk = (x - startX.current) * 1.5;
+    scrollRef.current.scrollLeft = scrollLeft.current - walk;
+  }, []);
+
+  return (
+    <div
+      ref={scrollRef}
+      className={cn(
+        'overflow-x-auto border-b shrink-0 select-none',
+        isDark ? 'border-white/5' : 'border-gray-200',
+      )}
+      style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', cursor: 'grab' }}
+      onMouseDown={handleMouseDown}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+      onMouseMove={handleMouseMove}
+    >
+      <div className="flex items-center gap-1.5 px-3 py-2 min-w-max">
+        {PHASE_ORDER.map((phase, i) => {
+          const done = phasesStatus?.[phase]?.completed;
+          const active = currentPhase === phase;
+          const Icon = PHASE_ICONS[phase];
+          return (
+            <React.Fragment key={phase}>
+              {i > 0 && (
+                <div className={cn(
+                  'h-px w-4 shrink-0 transition-colors',
+                  done ? 'bg-emerald-500/60' : (isDark ? 'bg-white/10' : 'bg-gray-200'),
+                )} />
               )}
-              title={PHASE_LABELS[phase]}
-            >
-              {done
-                ? <CheckCircle2 className="size-3.5" />
-                : active
+              <div
+                className={cn(
+                  'flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold transition-all shrink-0 whitespace-nowrap',
+                  done && 'bg-emerald-500/15 text-emerald-400',
+                  active && !done && 'bg-blue-500/15 text-blue-400 ring-1 ring-blue-500/30',
+                  !done && !active && (isDark ? 'text-white/30' : 'text-gray-400'),
+                )}
+                title={PHASE_LABELS[phase]}
+              >
+                {active && !done
                   ? <Loader2 className="size-3.5 animate-spin" />
                   : <Icon className="size-3.5" />
-              }
-              <span>{PHASE_LABELS[phase]}</span>
-            </div>
-          </React.Fragment>
-        );
-      })}
+                }
+                <span>{PHASE_LABELS[phase]}</span>
+                {done && <CheckCircle2 className="size-3 ml-0.5 text-emerald-400" />}
+              </div>
+            </React.Fragment>
+          );
+        })}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 /* ------------------------------------------------------------------ */
 /*  Chat bubble                                                        */
@@ -181,6 +215,177 @@ const FileExplorer: React.FC<{
     )}
   </div>
 );
+
+/* ------------------------------------------------------------------ */
+/*  Config Drawer — with provider + dynamic model loading              */
+/* ------------------------------------------------------------------ */
+interface ConfigDrawerProps {
+  config: import('../services/sdd-types').SDDConfig;
+  updateConfig: (partial: Partial<import('../services/sdd-types').SDDConfig>) => void;
+  isDarkTheme: boolean;
+  t: Record<string, string>;
+  onClose: () => void;
+}
+
+const PROVIDERS = [
+  { id: 'gemini' as const, label: 'Google Gemini', icon: Sparkles },
+  { id: 'openai' as const, label: 'OpenAI', icon: Zap },
+];
+
+const ConfigDrawer: React.FC<ConfigDrawerProps> = ({ config, updateConfig, isDarkTheme, t, onClose }) => {
+  const [availableModels, setAvailableModels] = useState<{ id: string; name: string }[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Fetch models when provider or apiKey changes (debounced)
+  useEffect(() => {
+    if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
+    setAvailableModels([]);
+    setModelsError(null);
+
+    if (!config.apiKey || config.apiKey.length < 10) return;
+
+    loadTimeoutRef.current = setTimeout(() => {
+      setModelsLoading(true);
+      setModelsError(null);
+      fetch('http://localhost:8765/api/sdd/list-models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: config.provider, apiKey: config.apiKey }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.error) {
+            setModelsError(data.error);
+            setAvailableModels([]);
+          } else {
+            setAvailableModels(data.models || []);
+            // If current model not in list, auto-select first
+            if (data.models?.length && !data.models.some((m: any) => m.id === config.model)) {
+              updateConfig({ model: data.models[0].id });
+            }
+          }
+        })
+        .catch((err) => setModelsError(err.message))
+        .finally(() => setModelsLoading(false));
+    }, 800);
+
+    return () => { if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current); };
+  }, [config.provider, config.apiKey]);
+
+  const selectStyle = isDarkTheme
+    ? 'border-white/10 bg-[#161b22] text-white focus:border-blue-500/50'
+    : 'border-gray-300 bg-white text-gray-900 focus:border-blue-500';
+
+  return (
+    <div className={cn('border-b px-3 py-3 space-y-2.5 animate-in slide-in-from-top-2 duration-150', t.border, t.configBg)}>
+      {/* Provider */}
+      <div>
+        <label className={cn('text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1', t.label)}>
+          <Sparkles className="size-3" /> Proveedor
+        </label>
+        <div className="mt-1 flex gap-1.5">
+          {PROVIDERS.map(({ id, label, icon: PIcon }) => (
+            <button
+              key={id}
+              onClick={() => updateConfig({ provider: id, model: '' })}
+              className={cn(
+                'flex flex-1 items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] font-semibold transition-all',
+                config.provider === id
+                  ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                  : (isDarkTheme ? 'border-white/10 text-white/40 hover:border-white/20' : 'border-gray-300 text-gray-500 hover:border-gray-400'),
+              )}
+            >
+              <PIcon className="size-3.5" />
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* API Key */}
+      <div>
+        <label className={cn('text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1', t.label)}>
+          <Key className="size-3" /> API Key
+        </label>
+        <input
+          type="password"
+          value={config.apiKey}
+          onChange={(e) => updateConfig({ apiKey: e.target.value })}
+          placeholder={config.provider === 'gemini' ? 'AIzaSy...' : 'sk-...'}
+          className={cn('mt-1 w-full rounded-md border px-2.5 py-1.5 text-xs focus:outline-none', t.input)}
+        />
+      </div>
+
+      {/* Model selector */}
+      <div>
+        <label className={cn('text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1', t.label)}>
+          Modelo
+          {modelsLoading && <Loader2 className="size-3 animate-spin ml-1" />}
+        </label>
+        {modelsError && (
+          <p className="mt-0.5 text-[10px] text-red-400">{modelsError}</p>
+        )}
+        <select
+          value={config.model}
+          onChange={(e) => updateConfig({ model: e.target.value })}
+          className={cn(
+            'mt-1 w-full rounded-md border px-2.5 py-1.5 text-xs focus:outline-none appearance-none',
+            selectStyle,
+          )}
+          disabled={modelsLoading}
+        >
+          {availableModels.length === 0 && !modelsLoading && (
+            <option value="">
+              {config.apiKey ? 'Ingresa tu API Key para cargar modelos' : 'Sin modelos disponibles'}
+            </option>
+          )}
+          {availableModels.map((m) => (
+            <option key={m.id} value={m.id} style={isDarkTheme ? { backgroundColor: '#161b22', color: '#e2e8f0' } : {}}>
+              {m.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Output Dir */}
+      <div>
+        <label className={cn('text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1', t.label)}>
+          <FolderInput className="size-3" /> Carpeta de Salida
+        </label>
+        <input
+          type="text"
+          value={config.outputDir}
+          onChange={(e) => updateConfig({ outputDir: e.target.value })}
+          placeholder="C:\\Users\\...\\mi-proyecto\\output"
+          className={cn('mt-1 w-full rounded-md border px-2.5 py-1.5 text-xs font-mono focus:outline-none', t.input)}
+        />
+        {config.recentDirs.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {config.recentDirs.map((d) => (
+              <button
+                key={d}
+                onClick={() => updateConfig({ outputDir: d })}
+                className={cn('rounded px-2 py-0.5 text-[9px] truncate max-w-[180px]', t.recentDir)}
+                title={d}
+              >
+                {d.split(/[\\/]/).pop()}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <button
+        onClick={onClose}
+        className="w-full rounded-md bg-blue-600/80 py-1.5 text-[11px] font-semibold hover:bg-blue-600 transition-colors text-white"
+      >
+        Guardar configuración
+      </button>
+    </div>
+  );
+};
 
 /* ------------------------------------------------------------------ */
 /*  Main Panel                                                         */
@@ -299,7 +504,7 @@ export const SDDPanel: React.FC<SDDPanelProps> = ({ open, onClose, isDarkTheme =
       ? 'border-white/10 bg-white/[0.04] text-white placeholder:text-white/20 focus:border-blue-500/50'
       : 'border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:border-blue-500',
     select: isDarkTheme
-      ? 'border-white/10 bg-white/[0.04] text-white focus:border-blue-500/50'
+      ? 'border-white/10 bg-[#161b22] text-white focus:border-blue-500/50'
       : 'border-gray-300 bg-white text-gray-900 focus:border-blue-500',
     tabActive: isDarkTheme ? 'border-blue-500 text-blue-400' : 'border-blue-600 text-blue-600',
     tabInactive: isDarkTheme ? 'text-white/30 hover:text-white/50' : 'text-gray-400 hover:text-gray-600',
@@ -343,64 +548,13 @@ export const SDDPanel: React.FC<SDDPanelProps> = ({ open, onClose, isDarkTheme =
 
       {/* ---- Config Drawer ---- */}
       {showConfig && (
-        <div className={cn('border-b px-3 py-3 space-y-2.5 animate-in slide-in-from-top-2 duration-150', t.border, t.configBg)}>
-          <div>
-            <label className={cn('text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1', t.label)}>
-              <Key className="size-3" /> API Key
-            </label>
-            <input
-              type="password"
-              value={config.apiKey}
-              onChange={(e) => updateConfig({ apiKey: e.target.value })}
-              placeholder="AIzaSy..."
-              className={cn('mt-1 w-full rounded-md border px-2.5 py-1.5 text-xs focus:outline-none', t.input)}
-            />
-          </div>
-          <div>
-            <label className={cn('text-[10px] font-semibold uppercase tracking-wider', t.label)}>Modelo</label>
-            <select
-              value={config.model}
-              onChange={(e) => updateConfig({ model: e.target.value })}
-              className={cn('mt-1 w-full rounded-md border px-2.5 py-1.5 text-xs focus:outline-none', t.select)}
-            >
-              <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-              <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-              <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-            </select>
-          </div>
-          <div>
-            <label className={cn('text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1', t.label)}>
-              <FolderInput className="size-3" /> Carpeta de Salida
-            </label>
-            <input
-              type="text"
-              value={config.outputDir}
-              onChange={(e) => updateConfig({ outputDir: e.target.value })}
-              placeholder="C:\Users\...\mi-proyecto\output"
-              className={cn('mt-1 w-full rounded-md border px-2.5 py-1.5 text-xs font-mono focus:outline-none', t.input)}
-            />
-            {config.recentDirs.length > 0 && (
-              <div className="mt-1.5 flex flex-wrap gap-1">
-                {config.recentDirs.map((d) => (
-                  <button
-                    key={d}
-                    onClick={() => updateConfig({ outputDir: d })}
-                    className={cn('rounded px-2 py-0.5 text-[9px] truncate max-w-[180px]', t.recentDir)}
-                    title={d}
-                  >
-                    {d.split(/[\\/]/).pop()}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <button
-            onClick={() => setShowConfig(false)}
-            className="w-full rounded-md bg-blue-600/80 py-1.5 text-[11px] font-semibold hover:bg-blue-600 transition-colors text-white"
-          >
-            Guardar configuración
-          </button>
-        </div>
+        <ConfigDrawer
+          config={config}
+          updateConfig={updateConfig}
+          isDarkTheme={isDarkTheme}
+          t={t}
+          onClose={() => setShowConfig(false)}
+        />
       )}
 
       {/* ---- Phase Tracker (scrollable, with icons) ---- */}

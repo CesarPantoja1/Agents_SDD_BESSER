@@ -36,6 +36,7 @@ export interface SDDFileEntry {
 
 export interface SDDConfig {
   apiKey: string;
+  provider: 'gemini' | 'openai';
   model: string;
   outputDir: string;
   recentDirs: string[];
@@ -88,7 +89,7 @@ export type SDDServerMessage =
 /** Client → Server messages */
 export type SDDClientMessage =
   | { type: 'message'; content: string }
-  | { type: 'config'; apiKey?: string; model?: string; outputDir?: string }
+  | { type: 'config'; apiKey?: string; provider?: string; model?: string; outputDir?: string }
   | { type: 'reset' }
   | { type: 'list_files' }
   | { type: 'read_file'; path: string }
@@ -114,6 +115,7 @@ export const PHASE_EMOJI: Record<SDDPhase, string> = {
 
 export const DEFAULT_SDD_CONFIG: SDDConfig = {
   apiKey: '',
+  provider: 'gemini',
   model: 'gemini-2.5-flash',
   outputDir: '',
   recentDirs: [],
